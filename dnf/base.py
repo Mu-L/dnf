@@ -111,7 +111,9 @@ class Base(object):
         self._trans_success = False
         self._trans_install_set = False
         self._tempfile_persistor = None
+        #  self._update_security_filters is used by ansible
         self._update_security_filters = []
+        self._update_security_options = {}
         self._allow_erasing = False
         self._repo_set_imported_gpg_keys = set()
         self.output = None
@@ -684,6 +686,8 @@ class Base(object):
         ts = self.history.rpm
         all_obsoleted = set(goal.list_obsoleted())
         installonly_query = self._get_installonly_query()
+        installonly_query.apply()
+        installonly_query_installed = installonly_query.installed().apply()
 
         for pkg in goal.list_downgrades():
             obs = goal.obsoleted_by_package(pkg)
@@ -715,11 +719,11 @@ class Base(object):
 
             reason = goal.get_reason(pkg)
 
-            if pkg in installonly_query:
-                reason_installonly = ts.get_reason(pkg)
-                if libdnf.transaction.TransactionItemReasonCompare(
-                        reason, reason_installonly) == -1:
-                    reason = reason_installonly
+            #  Inherit reason if package is installonly an package with same name is installed
+            #  Use the same logic like upgrade
+            #  Upgrade of installonly packages result in install or install and remove step
+            if pkg in installonly_query and installonly_query_installed.filter(name=pkg.name):
+                reason = ts.get_reason(pkg)
 
             # inherit the best reason from obsoleted packages
             for obsolete in obs:
@@ -756,10 +760,18 @@ class Base(object):
                 ts.add_upgrade(pkg, upgraded, obs)
                 self._ds_callback.pkg_added(upgraded, 'ud')
             self._ds_callback.pkg_added(pkg, 'u')
-        for pkg in goal.list_erasures():
-            self._ds_callback.pkg_added(pkg, 'e')
-            reason = goal.get_reason(pkg)
-            ts.add_erase(pkg, reason)
+        erasures = goal.list_erasures()
+        if erasures:
+            remaining_installed_query = self.sack.query(flags=hawkey.IGNORE_EXCLUDES).installed()
+            remaining_installed_query.filterm(pkg__neq=erasures)
+            for pkg in erasures:
+                if remaining_installed_query.filter(name=pkg.name):
+                    remaining = remaining_installed_query[0]
+                    ts.get_reason(remaining)
+                    self.history.set_reason(remaining, ts.get_reason(remaining))
+                self._ds_callback.pkg_added(pkg, 'e')
+                reason = goal.get_reason(pkg)
+                ts.add_erase(pkg, reason)
         return ts
 
     def _query_matches_installed(self, q):
@@ -1198,11 +1210,12 @@ class Base(object):
         if real != full:
             if real < full:
                 msg = _("Delta RPMs reduced %.1f MB of updates to %.1f MB "
-                        "(%d.1%% saved)")
+                        "(%.1f%% saved)")
+                percent = 100 - real / full * 100
             elif real > full:
                 msg = _("Failed Delta RPMs increased %.1f MB of updates to %.1f MB "
-                        "(%d.1%% wasted)")
-            percent = 100 - real / full * 100
+                        "(%.1f%% wasted)")
+                percent = 100 - full / real * 100
             logger.info(msg, full / 1024 ** 2, real / 1024 ** 2, percent)
 
     def download_packages(self, pkglist, progress=None, callback_total=None):
@@ -1460,7 +1473,7 @@ class Base(object):
         elif pkgnarrow == 'upgrades':
             updates = query_for_repo(q).filterm(upgrades_by_priority=True)
             # reduce a query to security upgrades if they are specified
-            updates = self._merge_update_filters(updates)
+            updates = self._merge_update_filters(updates, upgrade=True)
             # reduce a query to latest packages
             updates = updates.latest().run()
 
@@ -2020,7 +2033,7 @@ class Base(object):
         if pkg in already_inst:
             self._report_already_installed([pkg])
         elif pkg not in itertools.chain.from_iterable(available):
-            raise dnf.exceptions.PackageNotFoundError(_('No match for argument: %s'), pkg.location)
+            raise dnf.exceptions.PackageNotFoundError(_('No match for argument: %s') % pkg.location)
         else:
             sltr = dnf.selector.Selector(self.sack)
             sltr.set(pkg=[pkg])
@@ -2049,12 +2062,18 @@ class Base(object):
             msg = _("File %s is a source package and cannot be updated, ignoring.")
             logger.info(msg, pkg.location)
             return 0
-
-        q = self.sack.query().installed().filterm(name=pkg.name, arch=[pkg.arch, "noarch"])
+        installed = self.sack.query().installed().apply()
+        if self.conf.obsoletes and self.sack.query().filterm(pkg=[pkg]).filterm(obsoletes=installed):
+            sltr = dnf.selector.Selector(self.sack)
+            sltr.set(pkg=[pkg])
+            self._goal.upgrade(select=sltr)
+            return 1
+        q = installed.filter(name=pkg.name, arch=[pkg.arch, "noarch"])
         if not q:
             msg = _("Package %s not installed, cannot update it.")
             logger.warning(msg, pkg.name)
-            raise dnf.exceptions.MarkingError(_('No match for argument: %s') % pkg.location, pkg.name)
+            raise dnf.exceptions.MarkingError(
+                _('No match for argument: %s') % pkg.location, pkg.name)
         elif sorted(q)[-1] < pkg:
             sltr = dnf.selector.Selector(self.sack)
             sltr.set(pkg=[pkg])
@@ -2068,20 +2087,21 @@ class Base(object):
 
     def _upgrade_internal(self, query, obsoletes, reponame, pkg_spec=None):
         installed_all = self.sack.query().installed()
+        # Add only relevant obsoletes to transaction => installed, upgrades
         q = query.intersection(self.sack.query().filterm(name=[pkg.name for pkg in installed_all]))
         installed_query = q.installed()
         if obsoletes:
             obsoletes = self.sack.query().available().filterm(
                 obsoletes=installed_query.union(q.upgrades()))
             # add obsoletes into transaction
-            q = q.union(obsoletes)
+            query = query.union(obsoletes)
         if reponame is not None:
-            q.filterm(reponame=reponame)
-        q = self._merge_update_filters(q, pkg_spec=pkg_spec)
-        if q:
-            q = q.available().union(installed_query.latest())
+            query.filterm(reponame=reponame)
+        query = self._merge_update_filters(query, pkg_spec=pkg_spec, upgrade=True)
+        if query:
+            query = query.union(installed_query.latest())
             sltr = dnf.selector.Selector(self.sack)
-            sltr.set(pkg=q)
+            sltr.set(pkg=query)
             self._goal.upgrade(select=sltr)
         return 1
 
@@ -2096,18 +2116,21 @@ class Base(object):
             # wildcard shouldn't print not installed packages
             # only solution with nevra.name provide packages with same name
             if not wildcard and solution['nevra'] and solution['nevra'].name:
-                installed = self.sack.query().installed()
                 pkg_name = solution['nevra'].name
-                installed.filterm(name=pkg_name).apply()
-                if not installed:
-                    msg = _('Package %s available, but not installed.')
-                    logger.warning(msg, pkg_name)
-                    raise dnf.exceptions.PackagesNotInstalledError(
-                        _('No match for argument: %s') % pkg_spec, pkg_spec)
-                if solution['nevra'].arch and not dnf.util.is_glob_pattern(solution['nevra'].arch):
-                    if not installed.filter(arch=solution['nevra'].arch):
-                        msg = _('Package %s available, but installed for different architecture.')
-                        logger.warning(msg, "{}.{}".format(pkg_name, solution['nevra'].arch))
+                installed = self.sack.query().installed().apply()
+                obsoleters = q.filter(obsoletes=installed) \
+                    if self.conf.obsoletes else self.sack.query().filterm(empty=True)
+                if not obsoleters:
+                    installed_name = installed.filter(name=pkg_name).apply()
+                    if not installed_name:
+                        msg = _('Package %s available, but not installed.')
+                        logger.warning(msg, pkg_name)
+                        raise dnf.exceptions.PackagesNotInstalledError(
+                            _('No match for argument: %s') % pkg_spec, pkg_spec)
+                    elif solution['nevra'].arch and not dnf.util.is_glob_pattern(solution['nevra'].arch):
+                        if not installed_name.filterm(arch=solution['nevra'].arch):
+                            msg = _('Package %s available, but installed for different architecture.')
+                            logger.warning(msg, "{}.{}".format(pkg_name, solution['nevra'].arch))
             obsoletes = self.conf.obsoletes and solution['nevra'] \
                         and solution['nevra'].has_just_name()
             return self._upgrade_internal(q, obsoletes, reponame, pkg_spec)
@@ -2285,36 +2308,89 @@ class Base(object):
                                for prefix in ['/bin/', '/sbin/', '/usr/bin/', '/usr/sbin/']]
         return self.sack.query().filterm(file__glob=binary_provides), binary_provides
 
-    def _merge_update_filters(self, q, pkg_spec=None, warning=True):
+    def add_security_filters(self, cmp_type, types=(), advisory=(), bugzilla=(), cves=(), severity=()):
+        #  :api
+        """
+        It modifies results of install, upgrade, and distrosync methods according to provided
+        filters.
+
+        :param cmp_type: only 'eq' or 'gte' allowed
+        :param types: List or tuple with strings. E.g. 'bugfix', 'enhancement', 'newpackage',
+        'security'
+        :param advisory: List or tuple with strings. E.g.Eg. FEDORA-2201-123
+        :param bugzilla: List or tuple with strings. Include packages that fix a Bugzilla ID,
+        Eg. 123123.
+        :param cves: List or tuple with strings. Include packages that fix a CVE
+        (Common Vulnerabilities and Exposures) ID. Eg. CVE-2201-0123
+        :param severity: List or tuple with strings. Includes packages that provide a fix
+        for an issue of the specified severity.
+        """
+        cmp_dict = {'eq': '__eqg', 'gte': '__eqg__gt'}
+        if cmp_type not in cmp_dict:
+            raise ValueError("Unsupported value for `cmp_type`")
+        cmp = cmp_dict[cmp_type]
+        if types:
+            key = 'advisory_type' + cmp
+            self._update_security_options.setdefault(key, set()).update(types)
+        if advisory:
+            key = 'advisory' + cmp
+            self._update_security_options.setdefault(key, set()).update(advisory)
+        if bugzilla:
+            key = 'advisory_bug' + cmp
+            self._update_security_options.setdefault(key, set()).update(bugzilla)
+        if cves:
+            key = 'advisory_cve' + cmp
+            self._update_security_options.setdefault(key, set()).update(cves)
+        if severity:
+            key = 'advisory_severity' + cmp
+            self._update_security_options.setdefault(key, set()).update(severity)
+
+    def reset_security_filters(self):
+        #  :api
+        """
+        Reset all security filters
+        """
+        self._update_security_options = {}
+
+    def _merge_update_filters(self, q, pkg_spec=None, warning=True, upgrade=False):
         """
         Merge Queries in _update_filters and return intersection with q Query
         @param q: Query
         @return: Query
         """
-        if not self._update_security_filters or not q:
+        if not (self._update_security_options or self._update_security_filters) or not q:
             return q
-        merged_queries = self._update_security_filters[0]
-        for query in self._update_security_filters[1:]:
-            merged_queries = merged_queries.union(query)
+        merged_queries = self.sack.query().filterm(empty=True)
+        if self._update_security_filters:
+            for query in self._update_security_filters:
+                merged_queries = merged_queries.union(query)
 
-        self._update_security_filters = [merged_queries]
+            self._update_security_filters = [merged_queries]
+        if self._update_security_options:
+            for filter_name, values in self._update_security_options.items():
+                if upgrade:
+                    filter_name = filter_name + '__upgrade'
+                kwargs = {filter_name: values}
+                merged_queries = merged_queries.union(q.filter(**kwargs))
+
         merged_queries = q.intersection(merged_queries)
         if not merged_queries:
             if warning:
                 q = q.upgrades()
                 count = len(q._name_dict().keys())
-                if pkg_spec is None:
-                    msg1 = _("No security updates needed, but {} update "
-                             "available").format(count)
-                    msg2 = _("No security updates needed, but {} updates "
-                             "available").format(count)
-                    logger.warning(P_(msg1, msg2, count))
-                else:
-                    msg1 = _('No security updates needed for "{}", but {} '
-                             'update available').format(pkg_spec, count)
-                    msg2 = _('No security updates needed for "{}", but {} '
-                             'updates available').format(pkg_spec, count)
-                    logger.warning(P_(msg1, msg2, count))
+                if count > 0:
+                    if pkg_spec is None:
+                        msg1 = _("No security updates needed, but {} update "
+                                 "available").format(count)
+                        msg2 = _("No security updates needed, but {} updates "
+                                 "available").format(count)
+                        logger.warning(P_(msg1, msg2, count))
+                    else:
+                        msg1 = _('No security updates needed for "{}", but {} '
+                                 'update available').format(pkg_spec, count)
+                        msg2 = _('No security updates needed for "{}", but {} '
+                                 'updates available').format(pkg_spec, count)
+                        logger.warning(P_(msg1, msg2, count))
         return merged_queries
 
     def _get_key_for_package(self, po, askcb=None, fullaskcb=None):
@@ -2368,7 +2444,10 @@ class Base(object):
 
                 # Try installing/updating GPG key
                 info.url = keyurl
-                dnf.crypto.log_key_import(info)
+                if self.conf.gpgkey_dns_verification:
+                    dnf.crypto.log_dns_key_import(info, dns_result)
+                else:
+                    dnf.crypto.log_key_import(info)
                 rc = False
                 if self.conf.assumeno:
                     rc = False
@@ -2486,7 +2565,7 @@ class Base(object):
 
     def _get_installonly_query(self, q=None):
         if q is None:
-            q = self._sack.query()
+            q = self._sack.query(flags=hawkey.IGNORE_EXCLUDES)
         installonly = q.filter(provides=self.conf.installonlypkgs)
         return installonly
 

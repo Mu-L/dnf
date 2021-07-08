@@ -13,14 +13,84 @@
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
 # Copyright 2003 Duke University
 
-from __future__ import print_function, absolute_import
-from __future__ import unicode_literals
+from __future__ import print_function, absolute_import, unicode_literals
 
-import rpm
 import os
+import subprocess
+import logging
+from shutil import which
 
-from dnf.i18n import ucd
+from dnf.i18n import _
 
+_logger = logging.getLogger('dnf')
+_rpmkeys_binary = None
+
+def _find_rpmkeys_binary():
+    global _rpmkeys_binary
+    if _rpmkeys_binary is None:
+        _rpmkeys_binary = which("rpmkeys")
+        _logger.debug(_('Using rpmkeys executable at %s to verify signatures'),
+                      _rpmkeys_binary)
+    return _rpmkeys_binary
+
+def _process_rpm_output(data):
+    # No signatures or digests = corrupt package.
+    # There is at least one line for -: and another (empty) entry after the
+    # last newline.
+    if len(data) < 3 or data[0] != b'-:' or data[-1]:
+        return 2
+    seen_sig, missing_key, not_trusted, not_signed = False, False, False, False
+    for i in data[1:-1]:
+        if b': BAD' in i:
+            return 2
+        elif i.endswith(b': NOKEY'):
+            missing_key = True
+        elif i.endswith(b': NOTTRUSTED'):
+            not_trusted = True
+        elif i.endswith(b': NOTFOUND'):
+            not_signed = True
+        elif not i.endswith(b': OK'):
+            return 2
+    if not_trusted:
+        return 3
+    elif missing_key:
+        return 1
+    elif not_signed:
+        return 4
+    # we still check return code, so this is safe
+    return 0
+
+def _verifyPackageUsingRpmkeys(package, installroot):
+    rpmkeys_binary = _find_rpmkeys_binary()
+    if rpmkeys_binary is None or not os.path.isfile(rpmkeys_binary):
+        _logger.critical(_('Cannot find rpmkeys executable to verify signatures.'))
+        return 2
+
+    # "--define=_pkgverify_level all" enforces signature checking;
+    # "--define=_pkgverify_flags 0x0" ensures that all signatures and digests
+    # are checked.
+    args = ('rpmkeys', '--checksig', '--root', installroot, '--verbose',
+            '--define=_pkgverify_level all', '--define=_pkgverify_flags 0x0',
+            '-')
+    with subprocess.Popen(
+            args=args,
+            executable=rpmkeys_binary,
+            env={'LC_ALL': 'C'},
+            stdout=subprocess.PIPE,
+            cwd='/',
+            stdin=package) as p:
+        data = p.communicate()[0]
+    returncode = p.returncode
+    if type(returncode) is not int:
+        raise AssertionError('Popen set return code to non-int')
+    # rpmkeys can return something other than 0 or 1 in the case of a
+    # fatal error (OOM, abort() called, SIGSEGV, etc)
+    if returncode >= 2 or returncode < 0:
+        return 2
+    ret = _process_rpm_output(data.split(b'\n'))
+    if ret:
+        return ret
+    return 2 if returncode else 0
 
 def checkSig(ts, package):
     """Takes a transaction set and a package, check it's sigs,
@@ -30,36 +100,9 @@ def checkSig(ts, package):
     return 3 if the key is not trusted
     return 4 if the pkg is not gpg or pgp signed"""
 
-    value = 0
-    currentflags = ts.setVSFlags(0)
-    fdno = os.open(package, os.O_RDONLY)
+    fdno = os.open(package, os.O_RDONLY|os.O_NOCTTY|os.O_CLOEXEC)
     try:
-        hdr = ts.hdrFromFdno(fdno)
-    except rpm.error as e:
-        if str(e) == "public key not available":
-            value = 1
-        if str(e) == "public key not trusted":
-            value = 3
-        if str(e) == "error reading package header":
-            value = 2
-    else:
-        # checks signature from an hdr
-        string = '%|DSAHEADER?{%{DSAHEADER:pgpsig}}:{%|RSAHEADER?{%{RSAHEADER:pgpsig}}:' \
-                 '{%|SIGGPG?{%{SIGGPG:pgpsig}}:{%|SIGPGP?{%{SIGPGP:pgpsig}}:{(none)}|}|}|}|'
-        try:
-            siginfo = hdr.sprintf(string)
-            siginfo = ucd(siginfo)
-            if siginfo == '(none)':
-                value = 4
-        except UnicodeDecodeError:
-            pass
-
-        del hdr
-
-    try:
+        value = _verifyPackageUsingRpmkeys(fdno, ts.ts.rootDir)
+    finally:
         os.close(fdno)
-    except OSError as e:  # if we're not opened, don't scream about it
-        pass
-
-    ts.setVSFlags(currentflags)  # put things back like they were before
     return value

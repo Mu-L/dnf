@@ -148,7 +148,7 @@ class BaseConfig(object):
                     try:
                         self._config.optBinds().at(name).newString(priority, value)
                     except RuntimeError as e:
-                        logger.debug(_('Unknown configuration value: %s=%s in %s; %s'),
+                        logger.error(_('Invalid configuration value: %s=%s in %s; %s'),
                                      ucd(name), ucd(value), ucd(filename), str(e))
                 else:
                     if name == 'arch' and hasattr(self, name):
@@ -174,6 +174,24 @@ class BaseConfig(object):
                     pass
 
         return '\n'.join(output) + '\n'
+
+    def set_or_append_opt_value(self, name, value_string, priority=PRIO_RUNTIME):
+        # :api
+        """For standard options, sets the value of the option if the priority is equal to or higher
+           than the current priority.
+           For "append" options, appends the values parsed from value_string to the current list of values. If the first
+           parsed element of the list of values is empty and the priority is equal to or higher than the current
+           priority, the current list is replaced with the new values.
+           If the priority is higher than the current priority, the current priority is increased to the priority.
+           Raises dnf.exceptions.ConfigError if the option with the given name does not exist or value_string contains
+           an invalid value or not allowed value.
+        """
+        opt_binds = self._config.optBinds()
+        try:
+            opt_binds.at(name).newString(priority, value_string)
+        except RuntimeError as e:
+            raise dnf.exceptions.ConfigError(
+                _('Cannot set "{}" to "{}": {}').format(name, value_string, str(e)), str(e))
 
     @staticmethod
     def write_raw_configfile(filename, section_id, substitutions, modify):

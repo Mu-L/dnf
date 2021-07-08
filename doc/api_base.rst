@@ -62,6 +62,22 @@
     :exc:`dnf.exceptions.Error` if the :attr:`goal` is not empty. `progress`, if given, should be a
     :class:`.DownloadProgress` instance which can be used to monitor the progress of the download.
 
+ .. method:: add_security_filters(cmp_type, types=(), advisory=(), bugzilla=(), cves=(), severity=())
+
+    It modifies results of install, upgrade, and distrosync methods according to provided filters.
+    `cmp_type` - only 'eq' or 'gte' allowed
+    `types` - List or tuple with strings. Eg. `bugfix`, `enhancement`, `newpackage`, `security`
+    `advisory` - List or tuple with strings. Eg. `FEDORA-2201-123`
+    `bugzilla` - List or tuple with strings. Include packages that fix a Bugzilla ID, Eg. `123123`.
+    `cves` - List or tuple with strings. Include packages that fix a CVE (Common Vulnerabilities
+    and Exposures) ID. Eg. `CVE-2201-0123`
+    `severity` - List or tuple with strings. Includes packages that provide a fix for an issue
+    of the specified severity.
+
+ .. method:: reset_security_filters()
+
+    Reset all security filters
+
   .. method:: close()
 
     Close all external handles the object holds. This is called automatically via context manager mechanism if the instance is handled using the ``with`` statement.
@@ -114,7 +130,7 @@
   .. method:: fill_sack_from_repos_in_cache(load_system_repo=True)
 
     Prepare Sack and Goal objects and load all enabled repositories from cache only, it doesn't download anything and it doesn't check if metadata are expired.
-    To successfully load a repository cache it requires repond.xml plus metadata (xml, yaml) or repond.xml plus generated cache files (solv, solvx).
+    To successfully load a repository cache it requires repomd.xml plus metadata (xml, yaml) or repomd.xml plus generated cache files (solv, solvx).
     If there is not enough metadata given repo is either skipped or it throws a :exc:`dnf.exceptions.RepoError` exception depending on :attr:`dnf.conf.Conf.skip_if_unavailable` configuration.
 
     All additional metadata are loaded if present but are not generally required. Note that some metadata like updateinfo.xml get processed into a solvx cache file and its sufficient to have either xml or solvx. Module metadata represented by modules.yaml are not processed therefore they are needed when they are defined in repomd.xml.

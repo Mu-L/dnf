@@ -88,8 +88,6 @@ def _urlopen_progress(url, conf, progress=None):
     if progress is None:
         progress = dnf.callback.NullDownloadProgress()
     pload = dnf.repo.RemoteRPMPayload(url, conf, progress)
-    if os.path.exists(pload.local_path):
-        return pload.local_path
     est_remote_size = sum([pload.download_size])
     progress.start(1, est_remote_size)
     targets = [pload._librepo_target()]
@@ -148,6 +146,27 @@ def ensure_dir(dname):
     except OSError as e:
         if e.errno != errno.EEXIST or not os.path.isdir(dname):
             raise e
+
+
+def split_path(path):
+    """
+    Split path by path separators.
+    Use os.path.join() to join the path back to string.
+    """
+    result = []
+
+    head = path
+    while True:
+        head, tail = os.path.split(head)
+        if not tail:
+            if head or not result:
+                # if not result: make sure result is [""] so os.path.join(*result) can be called
+                result.insert(0, head)
+            break
+        result.insert(0, tail)
+
+    return result
+
 
 def empty(iterable):
     try:
@@ -607,3 +626,8 @@ def _post_transaction_output(base, transaction, action_callback):
             action, sorted(tsis, key=functools.cmp_to_key(_tsi_or_pkg_nevra_cmp))))
 
     return out
+
+
+def _name_unset_wrapper(input_name):
+    # returns <name-unset> for everything that evaluates to False (None, empty..)
+    return input_name if input_name else _("<name-unset>")

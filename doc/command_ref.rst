@@ -124,6 +124,10 @@ Options
 ``-b, --best``
     Try the best available package versions in transactions. Specifically during :ref:`dnf upgrade <upgrade_command-label>`, which by default skips over updates that can not be installed for dependency reasons, the switch forces DNF to only consider the latest packages. When running into packages with broken dependencies, DNF will fail giving a reason why the latest version can not be installed.
 
+    Note that the use of the newest available version is only guaranteed for
+    the packages directly requested (e.g. as a command line arguments), and the
+    solver may use older versions of dependencies to meet their requirements.
+
 ``--bugfix``
     Include packages that fix a bugfix issue. Applicable for the install, repoquery, updateinfo and
     upgrade commands.
@@ -787,6 +791,7 @@ Info Command
 ------------
 
 | Command: ``info``
+| Aliases: ``if``
 
 ``dnf [options] info [<package-file-spec>...]``
     Lists description and summary information about installed and available packages.
@@ -938,7 +943,7 @@ Makecache Command
 | Aliases: ``mc``
 
 ``dnf [options] makecache``
-    Downloads and caches metadata for all known repos. Tries to
+    Downloads and caches metadata for enabled repositories. Tries to
     avoid downloading whenever possible (e.g. when the local metadata hasn't
     expired yet or when the metadata timestamp hasn't changed).
 
@@ -1091,7 +1096,7 @@ Provides Command
 ----------------
 
 | Command: ``provides``
-| Aliases: ``prov``, ``whatprovides``
+| Aliases: ``prov``, ``whatprovides``, ``wp``
 
 ``dnf [options] provides <provide-spec>``
     Finds the packages providing the given ``<provide-spec>``. This is useful
@@ -1647,6 +1652,7 @@ Updateinfo Command
 ------------------
 
 | Command: ``updateinfo``
+| Aliases: ``upif``
 | Deprecated aliases: ``list-updateinfo``, ``list-security``, ``list-sec``, ``info-updateinfo``, ``info-security``, ``info-sec``, ``summary-updateinfo``
 
 ``dnf [options] updateinfo [--summary|--list|--info] [<availability>] [<spec>...]``
@@ -1669,7 +1675,7 @@ Updateinfo Command
     cases when an advisory refers to a newer version but there is no enabled
     repository which contains any newer version.
 
-    Note, that ``--available`` tooks only the latest installed versions of
+    Note, that ``--available`` takes only the latest installed versions of
     packages into account. In case of the kernel packages (when multiple
     version could be installed simultaneously) also packages of the currently
     running version of kernel are added.

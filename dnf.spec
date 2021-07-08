@@ -2,13 +2,13 @@
 %define __cmake_in_source_build 1
 
 # default dependencies
-%global hawkey_version 0.59.0
+%global hawkey_version 0.61.1
 %global libcomps_version 0.1.8
 %global libmodulemd_version 2.9.3
 %global rpm_version 4.14.0
 
 # conflicts
-%global conflicts_dnf_plugins_core_version 4.0.16
+%global conflicts_dnf_plugins_core_version 4.0.20
 %global conflicts_dnf_plugins_extras_version 4.0.4
 %global conflicts_dnfdaemon_version 0.3.19
 
@@ -65,7 +65,7 @@
 It supports RPMs, modules and comps groups & environments.
 
 Name:           dnf
-Version:        4.6.0
+Version:        4.8.0
 Release:        1%{?dist}
 Summary:        %{pkg_summary}
 # For a breakdown of the licensing, see PACKAGE-LICENSING
@@ -150,7 +150,6 @@ BuildRequires:  python3-libcomps >= %{libcomps_version}
 BuildRequires:  python3-libdnf
 BuildRequires:  libmodulemd >= %{libmodulemd_version}
 Requires:       libmodulemd >= %{libmodulemd_version}
-BuildRequires:  python3-nose
 BuildRequires:  python3-gpg
 Requires:       python3-gpg
 Requires:       %{name}-data = %{version}-%{release}
@@ -253,22 +252,13 @@ popd
 
 
 %post automatic
-%systemd_post dnf-automatic.timer
-%systemd_post dnf-automatic-notifyonly.timer
-%systemd_post dnf-automatic-download.timer
-%systemd_post dnf-automatic-install.timer
+%systemd_post dnf-automatic.timer dnf-automatic-notifyonly.timer dnf-automatic-download.timer dnf-automatic-install.timer
 
 %preun automatic
-%systemd_preun dnf-automatic.timer
-%systemd_preun dnf-automatic-notifyonly.timer
-%systemd_preun dnf-automatic-download.timer
-%systemd_preun dnf-automatic-install.timer
+%systemd_preun dnf-automatic.timer dnf-automatic-notifyonly.timer dnf-automatic-download.timer dnf-automatic-install.timer
 
 %postun automatic
-%systemd_postun_with_restart dnf-automatic.timer
-%systemd_postun_with_restart dnf-automatic-notifyonly.timer
-%systemd_postun_with_restart dnf-automatic-download.timer
-%systemd_postun_with_restart dnf-automatic-install.timer
+%systemd_postun_with_restart dnf-automatic.timer dnf-automatic-notifyonly.timer dnf-automatic-download.timer dnf-automatic-install.timer
 
 
 %files -f %{name}.lang
@@ -371,6 +361,53 @@ popd
 %{python3_sitelib}/%{name}/automatic/
 
 %changelog
+* Mon Jun 14 2021 Pavla Kratochvilova <pkratoch@redhat.com> - 4.8.0-1
+- Do not assume that a remote rpm is complete if present
+- Use positive percentage for "Failed delta RPMs" message
+- Remove redundant new line in Groups output
+- Format empty group names outputs to <name-unset>
+- [doc] Document default colors
+- Use rpmkeys alone to verify signature
+- Add dnf.error message to explain rpm.error traceback when package not found after resolving a transaction (RhBug:1815327,1887293,1909845)
+- Bugs fixed (RhBug:1946975,1955309)
+
+* Mon Apr 12 2021 Nicola Sella <nsella@redhat.com> - 4.7.0-1
+- Improve repo config path ordering to fix a comps merging issue (RhBug:1928181)
+- Keep reason when package is removed (RhBug:1921063)
+- Improve mechanism for application of security filters (RhBug:1918475)
+- [doc] Add description for new API
+- [API] Add new method for reset of security filters
+- [doc] Improve documentation for Hotfix repositories
+- [doc] fix: "makecache" command downloads only enabled repositories
+- Use libdnf.utils.checksum_{check,value}
+- [doc] Add info that maximum parallel downloads is 20
+- Increase loglevel in case of invalid config options
+- [doc] installonly_limit documentation follows behavior
+- Prevent traceback (catch ValueError) if pkg is from cmdline
+- Add documentation for config option sslverifystatus (RhBug:1814383)
+- Check for specific key string when verifing signatures (RhBug:1915990)
+- Use rpmkeys binary to verify package signature (RhBug:1915990)
+- Bugs fixed (RhBug:1916783)
+- Preserve file mode during log rotation (RhBug:1910084)
+
+* Tue Mar 02 2021 Nicola Sella <nsella@redhat.com> - 4.6.1-1
+- Fix recreate script
+- Add unit test for fill_sack_from_repos_in_cache (RhBug:1865803)
+- Add docs and examples for fill_sack_from_repos_in_cache (RhBug:1865803)
+- [spec] remove python2 support
+- Remove problematic language
+- The noroot plugin no longer exists, remove mention
+- Run tests for fill_sack_from_repos_in_cache in installroot (RhBug:1865803)
+- expand history to full term size when output is redirected (RhBug:1852577) (RhBug:1852577,1906970)
+- [doc] Fix: "sslcacert" contains path to the file
+- [doc] Added proxy ssl configuration options, increase libdnf require
+- Set persistdir and substitutions for fill_sack_from_repos_in_cache tests (RhBug:1865803)
+- Update documentation for module_obsoletes and module_stream_switch
+- print additional information when verifying GPG key using DNS
+- Bugs fixed (RhBug:1897573)
+- Remove hardcoded logfile permissions (RhBug:1910084)
+- Enhanced detection of plugins removed in transaction (RhBug:1929163)
+
 * Thu Jan 28 2021 Nicola Sella <nsella@redhat.com> - 4.6.0-1
 - Log scriptlets output also for API users (RhBug:1847340)
 - Fix module remove --all when no match spec (RhBug:1904490)

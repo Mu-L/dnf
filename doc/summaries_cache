@@ -3294,5 +3294,57 @@
     [
         1876606,
         "dnf python API does not provide an rpm header of a package (as yum API does)"
+    ],
+    [
+        1852577,
+        "\"dnf history list\" displays an erratic output"
+    ],
+    [
+        1910084,
+        "hardcoded logfile permissions"
+    ],
+    [
+        1897573,
+        "[spec] Make new cmake macros optional"
+    ],
+    [
+        1929163,
+        "problem with transaction() hook"
+    ],
+    [
+        1906970,
+        "dnf history wrong output if piped through more or redirected to file"
+    ],
+    [
+        1921063,
+        "dnf autoremove wants to remove \"kernel-modules-extra\" if you have a rawhide kernel installed"
+    ],
+    [
+        1918475,
+        "dnf --security pulling in packages without security advisory"
+    ],
+    [
+        1814383,
+        "librepo does not do TLS certificate revocation checking"
+    ],
+    [
+        1928181,
+        "comps from the updates repo don't override comps from the fedora repo"
+    ],
+    [
+        1955309,
+        "Improperly formatted text string in dnf package_install"
+    ],
+    [
+        1950229,
+        "dnf with Python 3.10: DeprecationWarning: The distutils package is deprecated"
+    ],
+    [
+        1887293,
+        "[abrt] dnf: addErase(): transaction.py:103:addErase:_rpm.error: package not installed"
+    ],
+    [
+        1946975,
+        "dnf installs old version of dependency even though --best is used"
     ]
 ]
